@@ -1,0 +1,49 @@
+{
+  "name": "opencode-cache-compact",
+  "version": "0.1.0",
+  "description": "Cache-friendly context compaction for OpenCode: append a summary in place, then cut what the model sees down to it.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Lennart Schoch",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lennartschoch/opencode-cache-compact.git"
+  },
+  "homepage": "https://github.com/lennartschoch/opencode-cache-compact#readme",
+  "bugs": {
+    "url": "https://github.com/lennartschoch/opencode-cache-compact/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test",
+    "test:e2e": "OPENCODE_E2E=1 node --test test/e2e.test.ts",
+    "prepublishOnly": "npm run typecheck && npm test"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "compaction",
+    "prompt-cache",
+    "llama.cpp"
+  ],
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.17.9"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "^1.18.0",
+    "@opencode-ai/sdk": "^1.18.0",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}
