@@ -237,3 +237,106 @@ test("caps summary output and lowers reasoning effort while summarizing", async 
   release()
   await settle()
 })
+
+test("does not cache a context window the provider failed to report", async () => {
+  // A transient miss must fall back for that call only. If the fallback were
+  // cached, a model would be stuck at the default window for the whole process
+  // and never trip again.
+  const calls: Call[] = []
+  let listCalls = 0
+  const client = {
+    provider: {
+      list: async () => {
+        listCalls++
+        // A transient failure on the first lookup.
+        if (listCalls === 1) throw new Error("provider list not ready")
+        return { data: { all: [{ id: "p", models: { m: { limit: { context: 10_000 } } } }] } }
+      },
+    },
+    app: { log: async () => {} },
+    session: {
+      abort: async () => {},
+      prompt: async (input: any) => {
+        calls.push({ name: "prompt", args: input })
+        return {
+          data: {
+            info: { role: "assistant", id: "sum", parentID: "sum_req", providerID: "p", modelID: "m" },
+            parts: [{ type: "text", text: "MY SUMMARY" }],
+          },
+        }
+      },
+    },
+  }
+  const hooks = createServer({ client } as any, {
+    threshold: 50,
+    contextLimit: 100_000,
+    autoResume: false,
+    abortSettleMs: 0,
+  })
+
+  const crossing = (id: string) =>
+    assistantTurn({
+      id,
+      tokens: { total: 40_000, input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    })
+
+  // 40k is under 50% of the 100k fallback, so the first step must not trip.
+  await hooks.event!(crossing("a1") as any)
+  await settle()
+  assert.equal(prompts(calls).length, 0, "no trip while the window is unknown")
+
+  // The provider now reports 10k: 40k is over 50%, so it must trip.
+  await hooks.event!(crossing("a2") as any)
+  await settle()
+  assert.equal(prompts(calls).length, 1, "re-resolves instead of caching the fallback")
+})
+
+test("does not re-summarize after a valid summary until the cut is observed", async () => {
+  // Regression: with abortOnTrip false the pre-cut turn keeps running and keeps
+  // reporting the full context. A time-based cooldown alone let that re-trip
+  // forever; the durable latch must swallow those stale completions.
+  const realNow = Date.now
+  let now = 1_000_000
+  Date.now = () => now
+  try {
+    const calls: Call[] = []
+    const hooks = createServer({ client: makeClient(calls) } as any, {
+      threshold: 50,
+      abortOnTrip: false,
+      autoResume: false,
+      abortSettleMs: 0,
+    })
+
+    const step = (id: string, total: number) =>
+      assistantTurn({
+        id,
+        finish: "tool-calls",
+        time: undefined,
+        tokens: { total, input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      })
+
+    await hooks.event!(step("a1", 8_000) as any)
+    await settle()
+    assert.equal(prompts(calls).length, 1, "the first crossing summarizes")
+
+    // Same still-high usage from the in-flight turn, past the cooldown.
+    now += 31_000
+    await hooks.event!(step("a2", 8_000) as any)
+    await settle()
+    assert.equal(prompts(calls).length, 1, "stale pre-cut usage must not re-summarize")
+
+    // The cut landed: usage drops under the threshold, which re-arms the latch.
+    await hooks.event!(step("a3", 1_000) as any)
+    await settle()
+    assert.equal(prompts(calls).length, 1, "re-arming alone does not summarize")
+
+    // A later, genuine crossing summarizes again.
+    now += 31_000
+    await hooks.event!(step("a4", 8_000) as any)
+    await settle()
+    assert.equal(prompts(calls).length, 2, "a later crossing summarizes again")
+  } finally {
+    Date.now = realNow
+  }
+})
+

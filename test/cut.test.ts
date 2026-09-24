@@ -1,7 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { cutMessages, extractText, SUMMARY_HEADING, type AnyMessage } from "../src/cut.ts"
+import { cutMessages, cutV2Messages, extractText, SUMMARY_HEADING, type AnyMessage, type AnyMessageV2 } from "../src/cut.ts"
 
 const text = (id: string, body: string): AnyMessage => ({
   info: { id, role: "user", sessionID: "ses_1" },
@@ -88,5 +88,34 @@ test("does not cut when the boundary or summary is absent", () => {
   const messages: AnyMessage[] = [text("u1", "task"), assistant("a1", "ok")]
   assert.equal(cutMessages(messages, "missing", "a1"), 0)
   assert.equal(cutMessages(messages, "u1", "missing"), 0)
+  assert.equal(messages.length, 2)
+})
+
+const v2 = (role: string, body: string): AnyMessageV2 => ({
+  role,
+  content: [{ type: "text", text: body }],
+})
+
+test("v2 cut locates the boundary by prompt text and rewrites it", () => {
+  const messages: AnyMessageV2[] = [
+    v2("user", "original task"),
+    v2("assistant", "working"),
+    v2("user", "PLEASE SUMMARIZE"),
+    v2("assistant", "SUMMARY TEXT"),
+    v2("user", "continue"),
+  ]
+
+  const removed = cutV2Messages(messages, "PLEASE SUMMARIZE", "SUMMARY TEXT")
+
+  assert.equal(removed, 3)
+  assert.equal(messages.length, 2)
+  assert.equal(messages[0]!.content![0]!.text, `${SUMMARY_HEADING}\n\nSUMMARY TEXT`)
+  assert.equal(messages[1]!.content![0]!.text, "continue")
+})
+
+test("v2 cut does nothing when the pieces are missing", () => {
+  const messages: AnyMessageV2[] = [v2("user", "task"), v2("assistant", "ok")]
+  assert.equal(cutV2Messages(messages, "no such prompt", "SUMMARY"), 0)
+  assert.equal(cutV2Messages(messages, "task", "no such summary"), 0)
   assert.equal(messages.length, 2)
 })

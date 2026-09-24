@@ -92,3 +92,55 @@ export function cutMessages(
 
   return dropped
 }
+
+/**
+ * V2 message shape: OpenCode 2 hands the transform hook AI-SDK-style messages
+ * (`{ role, content: ContentPart[] }`) without the stable message ids V1 had.
+ * Locate the boundary by the exact summary instruction we sent, and the reply by
+ * the summary text we captured, then rewrite the boundary to carry the summary
+ * and drop everything up to and including the reply.
+ *
+ * Mutates `messages` in place (V2 requires in-place mutation; reassigning the
+ * array is a no-op). Returns the number of messages removed, or 0 if nothing cut.
+ */
+export function cutV2Messages(
+  messages: AnyMessageV2[],
+  summaryPrompt: string,
+  summaryText: string,
+): number {
+  if (!Array.isArray(messages) || !summaryPrompt || !summaryText) return 0
+
+  const boundaryIndex = messages.findIndex(
+    (m) => m?.role === "user" && contentText(m) === summaryPrompt,
+  )
+  if (boundaryIndex < 0) return 0
+
+  const summaryIndex = messages.findIndex(
+    (m, i) => i > boundaryIndex && m?.role === "assistant" && contentText(m).includes(summaryText),
+  )
+  if (summaryIndex < 0) return 0
+
+  const boundary = messages[boundaryIndex]
+  boundary.content = [{ type: "text", text: `${SUMMARY_HEADING}\n\n${summaryText}` }]
+
+  const dropped = summaryIndex
+  messages.splice(boundaryIndex + 1, summaryIndex - boundaryIndex)
+  messages.splice(0, boundaryIndex)
+  return dropped
+}
+
+export type AnyMessageV2 = {
+  role?: string
+  content?: Array<{ type?: string; text?: string }>
+  [key: string]: unknown
+}
+
+/** Concatenate the visible text of a V2 `content` array. */
+export function contentText(message: AnyMessageV2 | undefined): string {
+  if (!Array.isArray(message?.content)) return ""
+  return message.content
+    .filter((part) => part?.type === "text" && typeof part.text === "string")
+    .map((part) => part.text as string)
+    .join("\n")
+    .trim()
+}

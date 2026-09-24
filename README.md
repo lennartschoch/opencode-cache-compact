@@ -36,9 +36,9 @@ The on-disk session is never modified — only what is sent to the model changes
 
 ## 📦 Install
 
-Requires OpenCode with the `experimental.chat.messages.transform` hook, and a model whose provider reports its context window.
+Works on OpenCode V1 and V2. Requires a model whose provider reports its context window. V1 needs the `experimental.chat.messages.transform` hook; V2 needs the `session.hook("context")` API (OpenCode 2 beta).
 
-### From npm
+### V1
 
 ```jsonc
 {
@@ -48,15 +48,33 @@ Requires OpenCode with the `experimental.chat.messages.transform` hook, and a mo
 }
 ```
 
-### From a local checkout
+### V2
 
 ```jsonc
 {
-  "plugin": [
-    ["file:///absolute/path/to/opencode-cache-compact/src/index.ts", { "threshold": 68 }]
+  "plugins": [
+    { "package": "opencode-cache-compact", "options": { "threshold": 68 } }
   ]
 }
 ```
+
+### From a local checkout
+
+```jsonc
+// V1
+{ "plugin": [["file:///absolute/path/to/opencode-cache-compact/src/index.ts", { "threshold": 68 }]] }
+```
+
+V2 (beta) auto-discovers plugins from the global plugins directory and rejects
+file paths in config in the current build, so drop a re-export there instead:
+
+```ts
+// ~/.config/opencode/plugins/cache-compact.ts
+export { default } from "/absolute/path/to/opencode-cache-compact/src/index.ts"
+```
+
+Auto-discovered plugins get no options, so this form uses the defaults. Use the
+npm form above when you need to pass options.
 
 Set `compaction.auto` to `false` if you want this plugin to be the only compaction.
 
@@ -93,8 +111,10 @@ The boundary message is reused as the carrier of the summary text, so the model 
 
 - The first request after a cut still prefills the system prompt, tool schemas and summary, since that becomes the new shared prefix. Keep summaries short and tool sets lean.
 - If the model returns no summary text, the plugin does not cut and retries after a cooldown rather than cutting to nothing.
+- After a summary, the plugin does not summarize again until it observes usage drop back under the threshold — i.e. until the cut has landed. This is what stops the `abortOnTrip: false` repeat-summary loop.
 - The cut boundary is kept in memory; restarting OpenCode simply means it won't cut until the next trip.
-- `experimental.chat.messages.transform` is an experimental OpenCode hook.
+- **V1:** `experimental.chat.messages.transform` is an experimental OpenCode hook. The plugin forces `compaction.prune = false`.
+- **V2 (beta):** uses `session.hook("context")` and the public event stream. `compaction.prune` no longer exists in V2, so `disablePrune` is a no-op there; V2's checkpoint compaction should be turned off (`compaction.auto: false`) or it can fire instead of this plugin. Usage is read by polling `session.context()` on session execution events rather than being pushed, so `abortSettleMs` and the trigger cadence differ slightly.
 
 ## 💻 Develop
 
@@ -102,29 +122,35 @@ The boundary message is reused as the carrier of the summary text, so the model 
 npm install
 npm run typecheck   # tsc --noEmit
 npm test            # unit tests (node --test; Node 24+ runs TypeScript directly)
-npm run test:e2e    # end-to-end: real `opencode serve` + a mock model server
+npm run test:e2e    # end-to-end: real `opencode` V1 + a mock model server (opt-in)
+npm run test:e2e:v2 # end-to-end: real `opencode2` + a mock model server (opt-in)
 ```
 
 ### Layout
 
 ```
 src/
-├── index.ts     # plugin entry — exports the default plugin and nothing else
-├── plugin.ts    # implementation: threshold watch, summary turn, cut, resume
-└── cut.ts       # pure: rewrite a message list down to the summary
+├── index.ts     # entry — one default export: V2 {id, setup} plus V1 server()
+├── core.ts      # runtime-agnostic state machine (latch, trip, summarize, resume)
+├── plugin.ts    # V1 adapter: OpenCode V1 hooks
+├── v2.ts        # V2 adapter: OpenCode 2 session hooks + event stream
+└── cut.ts       # pure: rewrite a message list down to the summary (V1 and V2 shapes)
 test/
-├── cut.test.ts     # the pure slicing logic
-├── index.test.ts   # the plugin hooks with a mock client
+├── cut.test.ts     # the pure slicing logic, both message shapes
+├── index.test.ts   # the plugin hooks with a mock client (V1)
+├── v2.test.ts      # the V2 adapter with a mock context
 └── e2e.test.ts     # real opencode + mock model (opt-in)
 ```
 
-`src/index.ts` exports only the default plugin: OpenCode registers every function export of the loaded file as its own plugin, so additional exports make it instantiate the plugin more than once.
+`src/index.ts` exports only the default plugin. OpenCode registers every function export of the loaded file as its own plugin, so additional exports make it instantiate the plugin more than once. The V1 and V2 hook wirings are intentionally separate — the shared behavior lives in `core.ts`.
 
 ## 🧪 Testing
 
 `npm test` covers the pure cut logic and the plugin's full state machine with a mock client.
 
-`npm run test:e2e` starts a real `opencode serve` with the plugin loaded from source, plus a mock OpenAI-compatible model server that records the exact HTTP request bodies. It asserts that the plugin summarizes once, resumes once, and that the resume request was cut to `[summary][resume]` — including across a tool-call loop that never idles.
+`npm run test:e2e` starts a real V1 `opencode serve` with the plugin loaded from source, plus a mock OpenAI-compatible model server that records the exact HTTP request bodies. It asserts that the plugin summarizes once, resumes once, and that the resume request was cut to `[summary][resume]` — including across a tool-call loop that never idles.
+
+`npm run test:e2e:v2` does the same against `opencode2`: it starts a standalone `serve`, authenticates with the password it prints, creates a session over the V2 client, and asserts the same one-summary/one-resume/cut shape.
 
 ## 📄 License
 
