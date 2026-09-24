@@ -2,14 +2,14 @@
 
 # 🗜️ opencode-cache-compact
 
-**Cache-friendly context compaction for [OpenCode](https://opencode.ai).**
+**Cache-friendly context compaction for [OpenCode](https://opencode.ai) V1 and V2.**
 
-An OpenCode plugin for locally hosted models, where prefilling a large context is the expensive part.
+For locally hosted models, where prefilling a large context is the expensive part.
 
 [Install](#-install) · [How it works](#-how-it-works) · [Options](#-options) · [Caveats](#-caveats) · [Develop](#-develop)
 
 [![npm](https://img.shields.io/npm/v/opencode-cache-compact?color=8B5CF6&style=flat-square)](https://www.npmjs.com/package/opencode-cache-compact)
-![tests](https://img.shields.io/badge/tests-14-brightgreen)
+![tests](https://img.shields.io/badge/tests-19-brightgreen)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 
 </div>
