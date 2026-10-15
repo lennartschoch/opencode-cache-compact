@@ -1,7 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { cutMessages, cutV2Messages, extractText, SUMMARY_HEADING, type AnyMessage, type AnyMessageV2 } from "../src/cut.ts"
+import { cutMessages, cutV2Messages, extractText, findSummaryKeys, SUMMARY_HEADING, type AnyMessage, type AnyMessageV2 } from "../src/cut.ts"
 
 const text = (id: string, body: string): AnyMessage => ({
   info: { id, role: "user", sessionID: "ses_1" },
@@ -118,4 +118,44 @@ test("v2 cut does nothing when the pieces are missing", () => {
   assert.equal(cutV2Messages(messages, "no such prompt", "SUMMARY"), 0)
   assert.equal(cutV2Messages(messages, "task", "no such summary"), 0)
   assert.equal(messages.length, 2)
+})
+
+const reply = (id: string, parentID: string, body: string, extra: Record<string, unknown> = {}): AnyMessage => ({
+  info: { id, role: "assistant", sessionID: "ses_1", parentID, ...extra },
+  parts: [{ type: "text", text: body, id: `${id}-p`, messageID: id, sessionID: "ses_1" }],
+})
+
+test("findSummaryKeys rebuilds the cut keys from the latest summary exchange", () => {
+  const messages: AnyMessage[] = [
+    text("u1", "task"),
+    text("req1", "SUMMARIZE"),
+    reply("sum1", "req1", "FIRST"),
+    text("u2", "more"),
+    text("req2", "SUMMARIZE"),
+    reply("sum2", "req2", "SECOND"),
+    text("u3", "next"),
+  ]
+  assert.deepEqual(findSummaryKeys(messages, "SUMMARIZE"), {
+    boundaryUserID: "req2",
+    summaryAssistantID: "sum2",
+    text: "SECOND",
+  })
+})
+
+test("findSummaryKeys ignores empty and errored replies and falls back to an earlier summary", () => {
+  const messages: AnyMessage[] = [
+    text("req1", "SUMMARIZE"),
+    reply("sum1", "req1", "FIRST"),
+    text("req2", "SUMMARIZE"),
+    reply("sum2", "req2", "", {}),
+    text("req3", "SUMMARIZE"),
+    reply("sum3", "req3", "PARTIAL", { error: { name: "Aborted" } }),
+  ]
+  assert.equal(findSummaryKeys(messages, "SUMMARIZE")?.summaryAssistantID, "sum1")
+})
+
+test("findSummaryKeys returns undefined without a matching summary exchange", () => {
+  assert.equal(findSummaryKeys([text("u1", "task"), reply("a1", "u1", "ok")], "SUMMARIZE"), undefined)
+  assert.equal(findSummaryKeys([text("req1", "other prompt"), reply("sum1", "req1", "X")], "SUMMARIZE"), undefined)
+  assert.equal(findSummaryKeys([], "SUMMARIZE"), undefined)
 })

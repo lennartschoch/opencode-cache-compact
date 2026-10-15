@@ -94,6 +94,43 @@ export function cutMessages(
 }
 
 /**
+ * Rebuild the V1 cut keys from the message list alone.
+ *
+ * The cut boundary normally lives only in memory, so a restart of OpenCode loses
+ * it and the next request carries the whole uncut history. The session on disk
+ * still holds the summary exchange, though: a user turn whose text is exactly the
+ * summary instruction, answered by an assistant message with the summary text.
+ * Find the most recent such pair so the cut can be re-applied.
+ *
+ * Returns undefined when no usable summary exists (never summarized, or the reply
+ * was empty or errored).
+ */
+export function findSummaryKeys(
+  messages: AnyMessage[],
+  summaryPrompt: string,
+): { boundaryUserID: string; summaryAssistantID: string; text: string } | undefined {
+  if (!Array.isArray(messages) || !summaryPrompt) return undefined
+  const wanted = summaryPrompt.trim()
+  const byID = new Map<string, AnyMessage>()
+  for (const m of messages) if (m?.info?.id) byID.set(m.info.id, m)
+
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const reply = messages[i]
+    if (reply?.info?.role !== "assistant" || reply.info.error) continue
+    const text = extractText(reply.parts)
+    if (!text) continue
+    const parentID = reply.info.parentID
+    if (typeof parentID !== "string") continue
+    const boundary = byID.get(parentID)
+    if (boundary?.info?.role !== "user") continue
+    const boundaryText = extractText(boundary.parts)
+    if (boundaryText !== wanted && !boundaryText.startsWith(SUMMARY_HEADING)) continue
+    return { boundaryUserID: boundary.info.id, summaryAssistantID: reply.info.id, text }
+  }
+  return undefined
+}
+
+/**
  * V2 message shape: OpenCode 2 hands the transform hook AI-SDK-style messages
  * (`{ role, content: ContentPart[] }`) without the stable message ids V1 had.
  * Locate the boundary by the exact summary instruction we sent, and the reply by

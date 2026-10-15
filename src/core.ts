@@ -194,6 +194,14 @@ export type Core = {
   /** The text the V2 cut needs, if a summary exists. */
   cutInfo(sessionID: string): CutInfo | undefined
   captureModel(sessionID: string, providerID?: string, modelID?: string): void
+  /**
+   * Re-adopt a summary found in the session's own messages (after a restart wiped
+   * the in-memory cut state). A no-op when a cut is already known.
+   */
+  restoreCut(
+    sessionID: string,
+    found: { boundaryUserID: string; summaryAssistantID: string; text: string },
+  ): void
   onAssistantMessage(input: {
     sessionID: string
     id?: string
@@ -389,6 +397,22 @@ export function createCore(
       const state = states.get(sessionID)
       if (!state) return undefined
       return { prompt: state.summaryPrompt, text: state.summaryText }
+    },
+    restoreCut(sessionID, found) {
+      const state = ensureState(sessionID)
+      if (state.boundaryUserID && state.summaryAssistantID) return
+      state.boundaryUserID = found.boundaryUserID
+      state.summaryAssistantID = found.summaryAssistantID
+      state.summaryPrompt = cfg.summaryPrompt ?? DEFAULT_SUMMARY_PROMPT
+      state.summaryText = found.text
+      // Same latch as a fresh summary: re-arm only once usage is seen back under
+      // the threshold, so a restored cut cannot cause an immediate re-summary.
+      state.armed = false
+      log("info", "restored cut from session history", {
+        sessionID,
+        summaryAssistantID: found.summaryAssistantID,
+        summaryChars: found.text.length,
+      })
     },
     captureModel(sessionID, providerID, modelID) {
       const state = ensureState(sessionID)

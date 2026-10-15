@@ -9,9 +9,10 @@
 
 import type { Plugin, PluginInput } from "@opencode-ai/plugin"
 import type { AssistantMessage, Event } from "@opencode-ai/sdk"
-import { cutMessages, extractText, type AnyMessage } from "./cut.ts"
+import { cutMessages, extractText, findSummaryKeys, type AnyMessage } from "./cut.ts"
 import {
   createCore,
+  DEFAULT_SUMMARY_PROMPT,
   tokenTotal,
   __resetSharedState,
   type CacheCompactOptions,
@@ -184,8 +185,20 @@ export const createServer = (
       if (!Array.isArray(messages) || messages.length === 0) return
       const sessionID = messages[0]?.info?.sessionID
       if (!sessionID) return
-      const keys = core.cutKeys(sessionID)
-      if (!keys?.boundaryUserID || !keys.summaryAssistantID) return
+      let keys = core.cutKeys(sessionID)
+      if (!keys?.boundaryUserID || !keys.summaryAssistantID) {
+        // No in-memory cut: either nothing was summarized yet, or OpenCode was
+        // restarted since. The summary exchange is still in the session, so look
+        // for it and re-adopt it rather than sending the whole uncut history.
+        const found = findSummaryKeys(
+          messages,
+          core.options.summaryPrompt ?? DEFAULT_SUMMARY_PROMPT,
+        )
+        if (!found) return
+        core.restoreCut(sessionID, found)
+        keys = core.cutKeys(sessionID)
+        if (!keys?.boundaryUserID || !keys.summaryAssistantID) return
+      }
       cutMessages(messages, keys.boundaryUserID, keys.summaryAssistantID)
     },
   }

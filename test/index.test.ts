@@ -2,6 +2,7 @@ import { test, beforeEach } from "node:test"
 import assert from "node:assert/strict"
 
 import { createServer, __resetSharedState } from "../src/plugin.ts"
+import { DEFAULT_SUMMARY_PROMPT } from "../src/core.ts"
 
 beforeEach(() => __resetSharedState())
 
@@ -340,3 +341,36 @@ test("does not re-summarize after a valid summary until the cut is observed", as
   }
 })
 
+
+test("re-applies the cut from the session history after a restart", async () => {
+  // A fresh process has no in-memory state (beforeEach resets the shared registry),
+  // but the session still holds the summary exchange from before the restart.
+  const hooks = createServer({ client: makeClient([]) } as any, {})
+  const messages: any[] = [
+    { info: { id: "u1", role: "user", sessionID: "s1" }, parts: [{ type: "text", text: "task" }] },
+    { info: { id: "a1", role: "assistant", sessionID: "s1", parentID: "u1" }, parts: [{ type: "text", text: "ok" }] },
+    { info: { id: "req", role: "user", sessionID: "s1" }, parts: [{ type: "text", text: DEFAULT_SUMMARY_PROMPT }] },
+    { info: { id: "sum", role: "assistant", sessionID: "s1", parentID: "req" }, parts: [{ type: "text", text: "MY SUMMARY" }] },
+    { info: { id: "u2", role: "user", sessionID: "s1" }, parts: [{ type: "text", text: "continue" }] },
+  ]
+  await hooks["experimental.chat.messages.transform"]!({}, { messages } as any)
+
+  assert.deepEqual(
+    messages.map((m) => m.info.id),
+    ["req", "u2"],
+  )
+  assert.equal(messages[0]!.parts[0]!.text, "## Prior work summary\n\nMY SUMMARY")
+})
+
+test("leaves the history alone when no summary exchange exists", async () => {
+  const hooks = createServer({ client: makeClient([]) } as any, {})
+  const messages: any[] = [
+    { info: { id: "u1", role: "user", sessionID: "s1" }, parts: [{ type: "text", text: "task" }] },
+    { info: { id: "a1", role: "assistant", sessionID: "s1", parentID: "u1" }, parts: [{ type: "text", text: "ok" }] },
+  ]
+  await hooks["experimental.chat.messages.transform"]!({}, { messages } as any)
+  assert.deepEqual(
+    messages.map((m) => m.info.id),
+    ["u1", "a1"],
+  )
+})

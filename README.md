@@ -112,7 +112,7 @@ The boundary message is reused as the carrier of the summary text, so the model 
 - The first request after a cut still prefills the system prompt, tool schemas and summary, since that becomes the new shared prefix. Keep summaries short and tool sets lean.
 - If the model returns no summary text, the plugin does not cut and retries after a cooldown rather than cutting to nothing.
 - After a summary, the plugin does not summarize again until it observes usage drop back under the threshold — i.e. until the cut has landed. This is what stops the `abortOnTrip: false` repeat-summary loop.
-- The cut boundary is kept in memory; restarting OpenCode simply means it won't cut until the next trip.
+- The cut boundary is kept in memory. After a restart (V1) it is rebuilt from the session itself: the summary request and its reply are still stored, so the plugin finds the latest pair and re-applies the cut on the next request. If no usable summary is stored, nothing is cut until the next trip.
 - **V1:** `experimental.chat.messages.transform` is an experimental OpenCode hook. The plugin forces `compaction.prune = false`.
 - **V2 (beta):** uses `session.hook("context")` and the public event stream. `compaction.prune` no longer exists in V2, so `disablePrune` is a no-op there; V2's checkpoint compaction should be turned off (`compaction.auto: false`) or it can fire instead of this plugin. Usage is read by polling `session.context()` on session execution events rather than being pushed, so `abortSettleMs` and the trigger cadence differ slightly.
 
